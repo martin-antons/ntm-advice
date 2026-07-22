@@ -1,0 +1,20 @@
+{
+  "task": "copy",
+  "advices": [
+    "combined"
+  ],
+  "seeds": [1000, 1001, 1002],
+  "num_batches": 20000,
+  "report_interval": 200,
+  "checkpoint_interval": 5000,
+  "save_final": true,
+  "deterministic": false,
+  "output_root": "./runs/copy_advice_sweep",
+  "train_script": "train.py",
+  "params": {
+    "batch_size": 1,
+    "sequence_min_len": 1,
+    "sequence_max_len": 20,
+    "advice_strength": 1.0
+  }
+}

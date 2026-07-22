@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-07-17T05:46:26.635908+00:00",
+  "updated_at": "2026-07-17T06:44:01.196526+00:00",
+  "config_file": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\experiments\\copy_sweep.json",
+  "config": {
+    "task": "copy",
+    "advices": [
+      "combined"
+    ],
+    "seeds": [
+      1000,
+      1001,
+      1002
+    ],
+    "num_batches": 20000,
+    "report_interval": 200,
+    "checkpoint_interval": 5000,
+    "save_final": true,
+    "deterministic": false,
+    "output_root": "./runs/copy_advice_sweep",
+    "train_script": "train.py",
+    "params": {
+      "batch_size": 1,
+      "sequence_min_len": 1,
+      "sequence_max_len": 20,
+      "advice_strength": 1.0
+    }
+  },
+  "runs": [
+    {
+      "run_id": "copy-combined-seed-1000",
+      "task": "copy",
+      "advice_type": "combined",
+      "seed": 1000,
+      "status": "completed",
+      "started_at": "2026-07-17T05:46:26.653522+00:00",
+      "finished_at": "2026-07-17T06:15:22.259133+00:00",
+      "return_code": 0,
+      "run_directory": "runs\\copy_advice_sweep\\copy\\combined\\seed_1000",
+      "command": "C:\\Users\\marti\\miniconda3\\envs\\pytorch-ntm\\python.exe train.py --task copy --seed 1000 -padvice_type=combined -pnum_batches=20000 --report-interval 200 --checkpoint-interval 5000 --checkpoint-path runs\\copy_advice_sweep\\copy\\combined\\seed_1000 --run-id copy-combined-seed-1000 -padvice_strength=1.0 -pbatch_size=1 -psequence_max_len=20 -psequence_min_len=1 --save-final"
+    },
+    {
+      "run_id": "copy-combined-seed-1001",
+      "task": "copy",
+      "advice_type": "combined",
+      "seed": 1001,
+      "status": "completed",
+      "started_at": "2026-07-17T06:15:22.261134+00:00",
+      "finished_at": "2026-07-17T06:44:01.194016+00:00",
+      "return_code": 0,
+      "run_directory": "runs\\copy_advice_sweep\\copy\\combined\\seed_1001",
+      "command": "C:\\Users\\marti\\miniconda3\\envs\\pytorch-ntm\\python.exe train.py --task copy --seed 1001 -padvice_type=combined -pnum_batches=20000 --report-interval 200 --checkpoint-interval 5000 --checkpoint-path runs\\copy_advice_sweep\\copy\\combined\\seed_1001 --run-id copy-combined-seed-1001 -padvice_strength=1.0 -pbatch_size=1 -psequence_max_len=20 -psequence_min_len=1 --save-final"
+    },
+    {
+      "run_id": "copy-combined-seed-1002",
+      "task": "copy",
+      "advice_type": "combined",
+      "seed": 1002,
+      "status": "running",
+      "started_at": "2026-07-17T06:44:01.196526+00:00",
+      "finished_at": null,
+      "return_code": null,
+      "run_directory": "runs\\copy_advice_sweep\\copy\\combined\\seed_1002",
+      "command": "C:\\Users\\marti\\miniconda3\\envs\\pytorch-ntm\\python.exe train.py --task copy --seed 1002 -padvice_type=combined -pnum_batches=20000 --report-interval 200 --checkpoint-interval 5000 --checkpoint-path runs\\copy_advice_sweep\\copy\\combined\\seed_1002 --run-id copy-combined-seed-1002 -padvice_strength=1.0 -pbatch_size=1 -psequence_max_len=20 -psequence_min_len=1 --save-final"
+    }
+  ]
+}
