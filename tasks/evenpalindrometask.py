@@ -1,14 +1,12 @@
 """Balanced even-length palindrome-recognition task.
 
-Every input sequence has an even length and uses the alphabet {0, 1}. Symbols
-are one-hot encoded, so the all-zero vector remains reserved for post-input
-processing steps. Positive and negative examples are generated in balanced form.
-
-After the delimiter, the NTM receives ``n/2`` zero-input processing steps. The
-classification loss is applied only to the last of those steps. This gives both a
-baseline NTM and an advice-augmented NTM enough recurrent computation time to
-retrieve and compare stored symbols.
+Every sequence has even length and uses the alphabet ``{0, 1}``. Symbols are
+one-hot encoded, leaving the all-zero vector for post-input processing. After
+the delimiter the NTM receives ``n/2`` zero-input steps, and only the final
+processing output is supervised.
 """
+
+from __future__ import annotations
 
 import random
 
@@ -23,10 +21,12 @@ from .advice_builders import (
     build_even_palindrome_advice,
     normalize_advice_type,
     uses_advice,
+    validate_advice_program,
 )
 
 
-def _choose_even_length(min_len: int, max_len: int) -> int:
+def _choose_even_length(min_len: int, max_len: int, *, py_rng=None) -> int:
+    py_rng = random if py_rng is None else py_rng
     even_lengths = [
         length
         for length in range(min_len, max_len + 1)
@@ -36,26 +36,45 @@ def _choose_even_length(min_len: int, max_len: int) -> int:
         raise ValueError(
             "The palindrome length range must contain a positive even length"
         )
-    return random.choice(even_lengths)
+    return py_rng.choice(even_lengths)
 
 
-def _balanced_labels(batch_num: int, batch_size: int) -> torch.Tensor:
-    """Return approximately/effectively balanced labels for every batch size."""
+def _balanced_labels(
+    batch_num: int,
+    batch_size: int,
+    *,
+    torch_generator=None,
+) -> torch.Tensor:
+    """Return exactly/approximately balanced labels for every batch size."""
     labels = (
         torch.arange(batch_size, dtype=torch.long)
         + int(batch_num)
     ) % 2
-    # Avoid a fixed association between batch index and class when batch_size>1.
     if batch_size > 1:
-        labels = labels[torch.randperm(batch_size)]
+        labels = labels[
+            torch.randperm(
+                batch_size,
+                generator=torch_generator,
+            )
+        ]
     return labels
 
 
 def _generate_sequences(
     sequence_length: int,
     labels: torch.Tensor,
+    *,
+    py_rng=None,
+    torch_generator=None,
 ) -> torch.Tensor:
-    """Generate guaranteed palindromes and guaranteed non-palindromes."""
+    """Generate guaranteed palindromes and guaranteed non-palindromes.
+
+    Negative examples are hard negatives: they begin as palindromes and one
+    mirrored pair is made inconsistent. The resulting negative distribution is
+    intentionally not uniform over all non-palindromes and must be documented
+    as part of the experimental task definition.
+    """
+    py_rng = random if py_rng is None else py_rng
     batch_size = int(labels.numel())
     half_length = sequence_length // 2
 
@@ -64,12 +83,16 @@ def _generate_sequences(
         2,
         (half_length, batch_size),
         dtype=torch.long,
+        generator=torch_generator,
     )
     right_half = torch.flip(left_half, dims=[0]).clone()
 
-    negative_indices = torch.nonzero(labels.eq(0), as_tuple=False).flatten()
+    negative_indices = torch.nonzero(
+        labels.eq(0),
+        as_tuple=False,
+    ).flatten()
     for batch_index in negative_indices.tolist():
-        pair_index = random.randrange(half_length)
+        pair_index = py_rng.randrange(half_length)
         mirrored_index = half_length - 1 - pair_index
         right_half[mirrored_index, batch_index] = (
             1 - right_half[mirrored_index, batch_index]
@@ -79,7 +102,7 @@ def _generate_sequences(
 
 
 def is_even_palindrome(sequence: torch.Tensor) -> torch.Tensor:
-    """Check a tensor of shape (length, batch) for palindrome membership."""
+    """Check a tensor of shape ``(length, batch)`` for membership."""
     if sequence.dim() != 2:
         raise ValueError("sequence must have shape (length, batch)")
     if sequence.size(0) % 2 != 0:
@@ -87,24 +110,33 @@ def is_even_palindrome(sequence: torch.Tensor) -> torch.Tensor:
     return sequence.eq(torch.flip(sequence, dims=[0])).all(dim=0)
 
 
-def dataloader(num_batches, batch_size, min_len, max_len):
-    """Yield balanced palindrome-classification batches.
-
-    Input shape:
-        ``(n + 1, batch, 3)``
-        channels 0/1 encode the symbol and channel 2 is the delimiter.
-
-    Target shape:
-        ``(n/2, batch, 1)``
-        only the final time step contains the binary class target.
-
-    Metadata includes a same-shaped ``loss_mask`` selecting only the final
-    classification step. No class labels are exposed to the advice builder.
-    """
+def dataloader(
+    num_batches,
+    batch_size,
+    min_len,
+    max_len,
+    *,
+    py_rng=None,
+    torch_generator=None,
+):
+    """Yield balanced palindrome-classification batches."""
     for batch_num in range(1, num_batches + 1):
-        seq_len = _choose_even_length(min_len, max_len)
-        labels = _balanced_labels(batch_num, batch_size)
-        symbols = _generate_sequences(seq_len, labels)
+        seq_len = _choose_even_length(
+            min_len,
+            max_len,
+            py_rng=py_rng,
+        )
+        labels = _balanced_labels(
+            batch_num,
+            batch_size,
+            torch_generator=torch_generator,
+        )
+        symbols = _generate_sequences(
+            seq_len,
+            labels,
+            py_rng=py_rng,
+            torch_generator=torch_generator,
+        )
 
         inp = torch.zeros(seq_len + 1, batch_size, 3)
         inp[:seq_len, :, 0] = symbols.eq(0).float()
@@ -123,6 +155,8 @@ def dataloader(num_batches, batch_size, min_len, max_len):
             "sequence_length": seq_len,
             "input_steps": seq_len + 1,
             "output_steps": comparison_steps,
+            "positive_examples": int(labels.sum().item()),
+            "negative_examples": int(labels.numel() - labels.sum().item()),
             "loss_mask": loss_mask,
         }
         yield batch_num, inp, outp, metadata
@@ -134,10 +168,10 @@ class EvenPalindromeTaskParams(object):
     controller_size = attrib(default=100, converter=int)
     controller_layers = attrib(default=1, converter=int)
 
-    # Two read heads allow one mirrored pair to be retrieved in one processing
-    # step. In this codebase num_heads creates an equal number of read/write
-    # pairs, so this also creates two write heads.
+    # Backwards compatibility: num_heads denotes the number of read heads.
+    # Palindrome comparison uses two reads but only one write.
     num_heads = attrib(default=2, converter=int)
+    num_write_heads = attrib(default=1, converter=int)
 
     sequence_min_len = attrib(default=2, converter=int)
     sequence_max_len = attrib(default=20, converter=int)
@@ -171,6 +205,17 @@ class EvenPalindromeTaskModelTraining(object):
                     self.params.advice_type
                 )
             )
+        if (
+            uses_advice(self.params.advice_type)
+            and self.params.advice_size != ADVICE_WIDTH
+        ):
+            raise ValueError(
+                "The current builders require advice_size={}, got {}".format(
+                    ADVICE_WIDTH,
+                    self.params.advice_size,
+                )
+            )
+
         advice_size = (
             self.params.advice_size
             if uses_advice(self.params.advice_type)
@@ -186,20 +231,39 @@ class EvenPalindromeTaskModelTraining(object):
             M=self.params.memory_m,
             advice_size=advice_size,
             advice_strength=self.params.advice_strength,
+            num_read_heads=self.params.num_heads,
+            num_write_heads=self.params.num_write_heads,
+        )
+
+    def make_dataloader(self, *, num_batches=None, seed=None):
+        count = (
+            self.params.num_batches
+            if num_batches is None
+            else int(num_batches)
+        )
+        if seed is None:
+            py_rng = None
+            torch_generator = None
+        else:
+            py_rng = random.Random(int(seed))
+            torch_generator = torch.Generator(device="cpu")
+            torch_generator.manual_seed(int(seed))
+
+        return dataloader(
+            count,
+            self.params.batch_size,
+            self.params.sequence_min_len,
+            self.params.sequence_max_len,
+            py_rng=py_rng,
+            torch_generator=torch_generator,
         )
 
     @dataloader.default
     def default_dataloader(self):
-        return dataloader(
-            self.params.num_batches,
-            self.params.batch_size,
-            self.params.sequence_min_len,
-            self.params.sequence_max_len,
-        )
+        return self.make_dataloader()
 
     @criterion.default
     def default_criterion(self):
-        # The generic training loop applies this only when no mask is present.
         return nn.BCELoss()
 
     @optimizer.default
@@ -212,11 +276,18 @@ class EvenPalindromeTaskModelTraining(object):
         )
 
     def build_advice(self, metadata):
-        return build_even_palindrome_advice(
+        program = build_even_palindrome_advice(
             metadata["sequence_length"],
             self.params.advice_type,
             random_seed=(
                 self.params.advice_random_seed
-                + int(metadata["batch_num"])
+                + 1009 * int(metadata["sequence_length"])
+            ),
+        )
+        return validate_advice_program(
+            program,
+            expected_steps=(
+                int(metadata["input_steps"])
+                + int(metadata["output_steps"])
             ),
         )

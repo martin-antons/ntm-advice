@@ -1,5 +1,7 @@
 """Repeat-Copy task for a baseline NTM or an advice-augmented NTM."""
 
+from __future__ import annotations
+
 import random
 
 from attr import Factory, attrib, attrs
@@ -14,6 +16,7 @@ from .advice_builders import (
     build_repeat_copy_advice,
     normalize_advice_type,
     uses_advice,
+    validate_advice_program,
 )
 
 
@@ -25,52 +28,76 @@ def dataloader(
     seq_max_len,
     repeat_min,
     repeat_max,
+    *,
+    py_rng=None,
+    np_rng=None,
+    fixed_repetitions=None,
 ):
     """Generate Repeat-Copy examples and non-target metadata."""
+    py_rng = random if py_rng is None else py_rng
+
     reps_mean = (repeat_max + repeat_min) / 2
     reps_var = (((repeat_max - repeat_min + 1) ** 2) - 1) / 12
     reps_std = np.sqrt(reps_var)
 
-    def rpt_normalize(reps):
-        # The original task assumes at least two possible repetition counts.
+    def rpt_normalize(repetitions):
         if reps_std == 0:
             return 0.0
-        return (reps - reps_mean) / reps_std
+        return (repetitions - reps_mean) / reps_std
 
     for batch_num in range(1, num_batches + 1):
-        seq_len = random.randint(seq_min_len, seq_max_len)
-        reps = random.randint(repeat_min, repeat_max)
+        seq_len = py_rng.randint(seq_min_len, seq_max_len)
+        if fixed_repetitions is None:
+            repetitions = py_rng.randint(repeat_min, repeat_max)
+        else:
+            repetitions = int(fixed_repetitions)
+            if repetitions <= 0:
+                raise ValueError(
+                    "fixed_repetitions must be positive"
+                )
 
-        seq = np.random.binomial(
-            1,
-            0.5,
-            (seq_len, batch_size, seq_width),
-        )
+        if np_rng is None:
+            seq = np.random.binomial(
+                1,
+                0.5,
+                (seq_len, batch_size, seq_width),
+            )
+        else:
+            seq = np_rng.binomial(
+                1,
+                0.5,
+                (seq_len, batch_size, seq_width),
+            )
         seq = torch.from_numpy(seq)
 
         inp = torch.zeros(seq_len + 2, batch_size, seq_width + 2)
         inp[:seq_len, :, :seq_width] = seq
         inp[seq_len, :, seq_width] = 1.0
-        inp[seq_len + 1, :, seq_width + 1] = rpt_normalize(reps)
+        inp[seq_len + 1, :, seq_width + 1] = rpt_normalize(
+            repetitions
+        )
 
         outp = torch.zeros(
-            seq_len * reps + 1,
+            seq_len * repetitions + 1,
             batch_size,
             seq_width + 1,
         )
-        outp[:seq_len * reps, :, :seq_width] = seq.clone().repeat(
-            reps,
+        outp[: seq_len * repetitions, :, :seq_width] = seq.clone().repeat(
+            repetitions,
             1,
             1,
         )
-        outp[seq_len * reps, :, seq_width] = 1.0
+        outp[seq_len * repetitions, :, seq_width] = 1.0
 
         metadata = {
             "batch_num": batch_num,
             "sequence_length": seq_len,
-            "repetitions": reps,
+            "repetitions": repetitions,
+            "normalized_repetitions": float(
+                rpt_normalize(repetitions)
+            ),
             "input_steps": seq_len + 2,
-            "output_steps": seq_len * reps + 1,
+            "output_steps": seq_len * repetitions + 1,
         }
         yield batch_num, inp.float(), outp.float(), metadata
 
@@ -116,6 +143,24 @@ class RepeatCopyTaskModelTraining(object):
                     self.params.advice_type
                 )
             )
+        if (
+            uses_advice(self.params.advice_type)
+            and self.params.advice_size != ADVICE_WIDTH
+        ):
+            raise ValueError(
+                "The current builders require advice_size={}, got {}".format(
+                    ADVICE_WIDTH,
+                    self.params.advice_size,
+                )
+            )
+        if (
+            self.params.advice_type == "wrong"
+            and self.params.sequence_min_len < 2
+        ):
+            raise ValueError(
+                "wrong Repeat-Copy advice requires sequence_min_len >= 2"
+            )
+
         advice_size = (
             self.params.advice_size
             if uses_advice(self.params.advice_type)
@@ -133,17 +178,35 @@ class RepeatCopyTaskModelTraining(object):
             advice_strength=self.params.advice_strength,
         )
 
-    @dataloader.default
-    def default_dataloader(self):
+    def make_dataloader(self, *, num_batches=None, seed=None, fixed_repetitions=None):
+        count = (
+            self.params.num_batches
+            if num_batches is None
+            else int(num_batches)
+        )
+        if seed is None:
+            py_rng = None
+            np_rng = None
+        else:
+            py_rng = random.Random(int(seed))
+            np_rng = np.random.default_rng(int(seed))
+
         return dataloader(
-            self.params.num_batches,
+            count,
             self.params.batch_size,
             self.params.sequence_width,
             self.params.sequence_min_len,
             self.params.sequence_max_len,
             self.params.repeat_min,
             self.params.repeat_max,
+            py_rng=py_rng,
+            np_rng=np_rng,
+            fixed_repetitions=fixed_repetitions,
         )
+
+    @dataloader.default
+    def default_dataloader(self):
+        return self.make_dataloader()
 
     @criterion.default
     def default_criterion(self):
@@ -159,12 +222,19 @@ class RepeatCopyTaskModelTraining(object):
         )
 
     def build_advice(self, metadata):
-        return build_repeat_copy_advice(
+        program = build_repeat_copy_advice(
             metadata["sequence_length"],
             metadata["repetitions"],
             self.params.advice_type,
             random_seed=(
                 self.params.advice_random_seed
-                + int(metadata["batch_num"])
+                + 1009 * int(metadata["sequence_length"])
+            ),
+        )
+        return validate_advice_program(
+            program,
+            expected_steps=(
+                int(metadata["input_steps"])
+                + int(metadata["output_steps"])
             ),
         )

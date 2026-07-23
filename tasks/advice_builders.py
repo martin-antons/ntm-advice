@@ -1,14 +1,16 @@
 """Task-specific structural advice builders.
 
-The builders in this module turn known task structure into two tensors:
+Each builder returns an ``AdviceProgram`` consisting of
 
-* an advice matrix ``A`` with shape ``(num_rows, ADVICE_WIDTH)``;
-* a deterministic row schedule ``rho`` with shape ``(total_model_steps,)``.
+* a fixed-width read-only matrix ``A`` with shape ``(num_rows, 16)``;
+* a deterministic schedule ``rho`` with one row index per model step.
 
-The advice never contains input symbols, target values, or concrete addresses in
-NTM task memory. Logical positions are normalized to [0, 1] and must still be
-interpreted by the learned controller.
+The rows never contain input symbols, target values, labels, or concrete rows
+of the writable NTM task memory. Logical positions are normalized to ``[0, 1]``
+and remain controller inputs rather than physical memory addresses.
 """
+
+from __future__ import annotations
 
 from enum import IntEnum
 from typing import NamedTuple, Optional
@@ -60,8 +62,14 @@ COMMON_ADVICE_TYPES = {
 }
 
 COPY_ADVICE_TYPES = COMMON_ADVICE_TYPES | {"write_only", "read_only"}
-REPEAT_COPY_ADVICE_TYPES = COMMON_ADVICE_TYPES | {"copy_only", "repeat_only"}
-PALINDROME_ADVICE_TYPES = COMMON_ADVICE_TYPES | {"count"}
+REPEAT_COPY_ADVICE_TYPES = COMMON_ADVICE_TYPES | {
+    "copy_only",
+    "repeat_only",
+}
+PALINDROME_ADVICE_TYPES = COMMON_ADVICE_TYPES | {
+    "count",       # backwards-compatible alias
+    "pair_index",  # clearer name for the same representation
+}
 
 
 def uses_advice(advice_type: str) -> bool:
@@ -161,16 +169,103 @@ def _stack(rows):
     return torch.stack(rows, dim=0)
 
 
-def _random_program(num_rows: int, schedule: torch.Tensor, seed: int) -> AdviceProgram:
-    generator = torch.Generator()
-    generator.manual_seed(int(seed))
-    matrix = torch.rand(
-        num_rows,
-        ADVICE_WIDTH,
-        generator=generator,
-        dtype=torch.float32,
+def validate_advice_program(
+    program: Optional[AdviceProgram],
+    *,
+    expected_steps: Optional[int] = None,
+) -> Optional[AdviceProgram]:
+    """Validate the tensor contract shared by builders, tasks and training."""
+    if program is None:
+        return None
+
+    matrix, schedule = program
+    if not torch.is_tensor(matrix) or not torch.is_tensor(schedule):
+        raise TypeError("AdviceProgram entries must be torch tensors")
+    if matrix.dim() != 2 or matrix.size(1) != ADVICE_WIDTH:
+        raise ValueError(
+            "advice matrix must have shape (num_rows, {})".format(
+                ADVICE_WIDTH
+            )
+        )
+    if matrix.size(0) <= 0:
+        raise ValueError("advice matrix must contain at least one row")
+    if not matrix.is_floating_point():
+        raise TypeError("advice matrix must use a floating-point dtype")
+    if not torch.isfinite(matrix).all():
+        raise ValueError("advice matrix contains non-finite values")
+
+    if schedule.dim() != 1:
+        raise ValueError("task builders must return a one-dimensional schedule")
+    if schedule.dtype != torch.long:
+        raise TypeError("advice schedule must use torch.long")
+    if schedule.numel() <= 0:
+        raise ValueError("advice schedule must contain at least one step")
+    if expected_steps is not None and schedule.numel() != int(expected_steps):
+        raise ValueError(
+            "advice schedule contains {} steps, expected {}".format(
+                schedule.numel(),
+                int(expected_steps),
+            )
+        )
+    if torch.any(schedule < -1):
+        raise IndexError("advice schedule indices must be -1 or non-negative")
+    active = schedule.ge(0)
+    if active.any() and torch.any(schedule[active] >= matrix.size(0)):
+        raise IndexError("advice schedule contains an out-of-range row index")
+
+    return AdviceProgram(
+        matrix=matrix.to(dtype=torch.float32),
+        schedule=schedule.to(dtype=torch.long),
     )
-    return AdviceProgram(matrix=matrix, schedule=schedule.clone())
+
+
+def _program(matrix, schedule, total_steps: int) -> AdviceProgram:
+    return validate_advice_program(
+        AdviceProgram(matrix=matrix, schedule=schedule),
+        expected_steps=total_steps,
+    )
+
+
+def _matched_random_program(
+    reference_matrix: torch.Tensor,
+    schedule: torch.Tensor,
+    seed: int,
+    total_steps: int,
+) -> AdviceProgram:
+    """Create deterministic sparsity- and norm-matched random advice.
+
+    Each random row has the same number of active entries and the same L2 norm
+    as the corresponding structured reference row, but active dimensions and
+    values are random. This controls vector scale and density more fairly than
+    a dense ``U(0, 1)`` matrix.
+    """
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(int(seed))
+    random_matrix = torch.zeros_like(reference_matrix, dtype=torch.float32)
+
+    for row_index, reference_row in enumerate(reference_matrix):
+        active_count = int(reference_row.ne(0).sum().item())
+        reference_norm = float(reference_row.norm().item())
+        if active_count == 0 or reference_norm == 0.0:
+            continue
+
+        active_dimensions = torch.randperm(
+            ADVICE_WIDTH,
+            generator=generator,
+        )[:active_count]
+        values = torch.rand(
+            active_count,
+            generator=generator,
+            dtype=torch.float32,
+        )
+        values = values / values.norm().clamp_min(1e-12) * reference_norm
+        random_matrix[row_index, active_dimensions] = values
+
+    return _program(
+        random_matrix,
+        schedule.clone(),
+        total_steps,
+    )
 
 
 def build_copy_advice(
@@ -179,9 +274,9 @@ def build_copy_advice(
     *,
     random_seed: int = 0,
 ) -> Optional[AdviceProgram]:
-    """Build structural advice for the Copy task.
+    """Build structural advice for Copy.
 
-    Total model steps are ``n + 1 + n``: input symbols, delimiter, outputs.
+    Total model steps are ``n + 1 + n``: input symbols, delimiter and outputs.
     """
     advice_type = _validate_type(advice_type, COPY_ADVICE_TYPES)
     if advice_type == "none":
@@ -190,29 +285,33 @@ def build_copy_advice(
     n = int(sequence_length)
     if n <= 0:
         raise ValueError("sequence_length must be positive")
+    if advice_type == "wrong" and n < 2:
+        raise ValueError("wrong Copy advice requires sequence_length >= 2")
+
     total_steps = 2 * n + 1
 
     if advice_type == "zero":
-        return AdviceProgram(
-            matrix=torch.zeros(1, ADVICE_WIDTH),
-            schedule=torch.zeros(total_steps, dtype=torch.long),
+        return _program(
+            torch.zeros(1, ADVICE_WIDTH),
+            torch.zeros(total_steps, dtype=torch.long),
+            total_steps,
         )
 
     if advice_type == "length":
-        matrix = _row(n).unsqueeze(0)
-        return AdviceProgram(matrix, torch.zeros(total_steps, dtype=torch.long))
+        return _program(
+            _row(n).unsqueeze(0),
+            torch.zeros(total_steps, dtype=torch.long),
+            total_steps,
+        )
 
-    position_rows = [
-        _row(n, position=i)
-        for i in range(n)
-    ]
+    position_rows = [_row(n, position=i) for i in range(n)]
     position_schedule = torch.tensor(
         list(range(n)) + [-1] + list(range(n)),
         dtype=torch.long,
     )
 
     if advice_type == "position":
-        return AdviceProgram(_stack(position_rows), position_schedule)
+        return _program(_stack(position_rows), position_schedule, total_steps)
 
     relation_rows = [
         _row(
@@ -224,7 +323,7 @@ def build_copy_advice(
         for i in range(n)
     ]
     if advice_type == "relation":
-        return AdviceProgram(_stack(relation_rows), position_schedule)
+        return _program(_stack(relation_rows), position_schedule, total_steps)
 
     if advice_type == "wrong":
         wrong_rows = [
@@ -236,7 +335,7 @@ def build_copy_advice(
             )
             for i in range(n)
         ]
-        return AdviceProgram(_stack(wrong_rows), position_schedule)
+        return _program(_stack(wrong_rows), position_schedule, total_steps)
 
     if advice_type == "operation":
         matrix = _stack([
@@ -248,7 +347,7 @@ def build_copy_advice(
             [0] * n + [1] + [2] * n,
             dtype=torch.long,
         )
-        return AdviceProgram(matrix, schedule)
+        return _program(matrix, schedule, total_steps)
 
     store_rows = [
         _row(
@@ -282,25 +381,26 @@ def build_copy_advice(
     )
 
     if advice_type == "combined":
-        return AdviceProgram(combined_matrix, combined_schedule)
+        return _program(combined_matrix, combined_schedule, total_steps)
     if advice_type == "random":
-        return _random_program(
-            combined_matrix.size(0),
+        return _matched_random_program(
+            combined_matrix,
             combined_schedule,
             random_seed,
+            total_steps,
         )
     if advice_type == "write_only":
         schedule = torch.tensor(
             list(range(n)) + [-1] + [-1] * n,
             dtype=torch.long,
         )
-        return AdviceProgram(_stack(store_rows), schedule)
+        return _program(_stack(store_rows), schedule, total_steps)
     if advice_type == "read_only":
         schedule = torch.tensor(
             [-1] * (n + 1) + list(range(n)),
             dtype=torch.long,
         )
-        return AdviceProgram(_stack(recall_rows), schedule)
+        return _program(_stack(recall_rows), schedule, total_steps)
 
     raise AssertionError("unhandled Copy advice type")
 
@@ -314,10 +414,10 @@ def build_repeat_copy_advice(
 ) -> Optional[AdviceProgram]:
     """Build structural advice for Repeat-Copy.
 
-    The matrix depends only on ``n``. The runtime schedule applies the same
-    cyclic rule for as many output steps as the task requests. The repetition
-    count is used only to size that schedule; it is never encoded in the advice
-    rows.
+    Advice rows depend on ``n`` but do not encode ``repetitions``. The task
+    runtime uses ``repetitions`` to unroll ``n*r + 1`` output steps. Cyclic
+    advice deliberately continues at the final end-marker step; therefore the
+    advice itself does not mark the requested stopping point.
     """
     advice_type = _validate_type(advice_type, REPEAT_COPY_ADVICE_TYPES)
     if advice_type == "none":
@@ -329,21 +429,27 @@ def build_repeat_copy_advice(
         raise ValueError("sequence_length must be positive")
     if repetitions <= 0:
         raise ValueError("repetitions must be positive")
+    if advice_type == "wrong" and n < 2:
+        raise ValueError(
+            "wrong Repeat-Copy advice requires sequence_length >= 2"
+        )
 
     input_steps = n + 2
     output_steps = n * repetitions + 1
     total_steps = input_steps + output_steps
 
     if advice_type == "zero":
-        return AdviceProgram(
+        return _program(
             torch.zeros(1, ADVICE_WIDTH),
             torch.zeros(total_steps, dtype=torch.long),
+            total_steps,
         )
 
     if advice_type == "length":
-        return AdviceProgram(
+        return _program(
             _row(n).unsqueeze(0),
             torch.zeros(total_steps, dtype=torch.long),
+            total_steps,
         )
 
     output_positions = [step % n for step in range(output_steps)]
@@ -353,7 +459,7 @@ def build_repeat_copy_advice(
     )
     position_rows = [_row(n, position=i) for i in range(n)]
     if advice_type == "position":
-        return AdviceProgram(_stack(position_rows), position_schedule)
+        return _program(_stack(position_rows), position_schedule, total_steps)
 
     successor_rows = [
         _row(
@@ -366,7 +472,7 @@ def build_repeat_copy_advice(
         for i in range(n)
     ]
     if advice_type == "relation":
-        return AdviceProgram(_stack(successor_rows), position_schedule)
+        return _program(_stack(successor_rows), position_schedule, total_steps)
 
     if advice_type == "wrong":
         wrong_rows = [
@@ -379,9 +485,9 @@ def build_repeat_copy_advice(
             )
             for i in range(n)
         ]
-        return AdviceProgram(_stack(wrong_rows), position_schedule)
+        return _program(_stack(wrong_rows), position_schedule, total_steps)
 
-    if advice_type in {"operation", "copy_only"}:
+    if advice_type == "operation":
         matrix = _stack([
             _row(n, input_phase=True, store_operation=True),
             _row(n, transition_phase=True),
@@ -391,14 +497,33 @@ def build_repeat_copy_advice(
             [0] * n + [1, 1] + [2] * output_steps,
             dtype=torch.long,
         )
-        return AdviceProgram(matrix, schedule)
+        return _program(matrix, schedule, total_steps)
+
+    # True Copy-only relation: the same logical position label is presented
+    # during input and every repeated output cycle, without phase/operation or
+    # successor information.
+    if advice_type == "copy_only":
+        copy_rows = [
+            _row(
+                n,
+                position=i,
+                related_position=i,
+                identity_relation=True,
+            )
+            for i in range(n)
+        ]
+        schedule = torch.tensor(
+            list(range(n)) + [-1, -1] + output_positions,
+            dtype=torch.long,
+        )
+        return _program(_stack(copy_rows), schedule, total_steps)
 
     if advice_type == "repeat_only":
         schedule = torch.tensor(
             [-1] * input_steps + output_positions,
             dtype=torch.long,
         )
-        return AdviceProgram(_stack(successor_rows), schedule)
+        return _program(_stack(successor_rows), schedule, total_steps)
 
     store_rows = [
         _row(
@@ -432,9 +557,14 @@ def build_repeat_copy_advice(
     )
 
     if advice_type == "combined":
-        return AdviceProgram(matrix, schedule)
+        return _program(matrix, schedule, total_steps)
     if advice_type == "random":
-        return _random_program(matrix.size(0), schedule, random_seed)
+        return _matched_random_program(
+            matrix,
+            schedule,
+            random_seed,
+            total_steps,
+        )
 
     raise AssertionError("unhandled Repeat-Copy advice type")
 
@@ -447,10 +577,10 @@ def build_even_palindrome_advice(
 ) -> Optional[AdviceProgram]:
     """Build structural advice for even-length palindrome recognition.
 
-    The model receives ``n/2`` post-input processing steps. The loss is applied
-    only to the last of those steps. Mirror advice describes logical pairs
-    ``(i, n-1-i)`` but never supplies concrete task-memory addresses or the
-    palindrome label.
+    The model receives ``n/2`` post-input processing steps, and only the final
+    one is supervised. Mirror rows describe ``(i, n-1-i)`` without symbols or
+    labels. ``count`` is kept as a backwards-compatible alias for
+    ``pair_index``: it supplies the left logical index of each mirror pair.
     """
     advice_type = _validate_type(advice_type, PALINDROME_ADVICE_TYPES)
     if advice_type == "none":
@@ -465,20 +595,27 @@ def build_even_palindrome_advice(
     total_steps = input_steps + comparison_steps
 
     if advice_type == "zero":
-        return AdviceProgram(
+        return _program(
             torch.zeros(1, ADVICE_WIDTH),
             torch.zeros(total_steps, dtype=torch.long),
+            total_steps,
         )
 
     if advice_type == "length":
-        return AdviceProgram(
+        return _program(
             _row(n).unsqueeze(0),
             torch.zeros(total_steps, dtype=torch.long),
+            total_steps,
         )
 
     input_position_rows = [_row(n, position=i) for i in range(n)]
     pair_position_rows = [
-        _row(n, position=i)
+        _row(
+            n,
+            position=i,
+            is_start_override=(i == 0),
+            is_end_override=(i == comparison_steps - 1),
+        )
         for i in range(comparison_steps)
     ]
     position_matrix = _stack(input_position_rows + pair_position_rows)
@@ -489,9 +626,9 @@ def build_even_palindrome_advice(
         dtype=torch.long,
     )
     if advice_type == "position":
-        return AdviceProgram(position_matrix, position_schedule)
+        return _program(position_matrix, position_schedule, total_steps)
 
-    count_rows = [
+    pair_index_rows = [
         _row(
             n,
             position=i,
@@ -502,12 +639,12 @@ def build_even_palindrome_advice(
         )
         for i in range(comparison_steps)
     ]
-    if advice_type == "count":
+    if advice_type in {"count", "pair_index"}:
         schedule = torch.tensor(
             [-1] * input_steps + list(range(comparison_steps)),
             dtype=torch.long,
         )
-        return AdviceProgram(_stack(count_rows), schedule)
+        return _program(_stack(pair_index_rows), schedule, total_steps)
 
     mirror_rows = [
         _row(
@@ -528,7 +665,7 @@ def build_even_palindrome_advice(
         dtype=torch.long,
     )
     if advice_type == "relation":
-        return AdviceProgram(relation_matrix, relation_schedule)
+        return _program(relation_matrix, relation_schedule, total_steps)
 
     if advice_type == "wrong":
         wrong_rows = [
@@ -543,7 +680,7 @@ def build_even_palindrome_advice(
             for i in range(comparison_steps)
         ]
         matrix = _stack(input_position_rows + wrong_rows)
-        return AdviceProgram(matrix, relation_schedule)
+        return _program(matrix, relation_schedule, total_steps)
 
     if advice_type == "operation":
         matrix = _stack([
@@ -555,7 +692,7 @@ def build_even_palindrome_advice(
             [0] * n + [1] + [2] * comparison_steps,
             dtype=torch.long,
         )
-        return AdviceProgram(matrix, schedule)
+        return _program(matrix, schedule, total_steps)
 
     store_rows = [
         _row(
@@ -589,8 +726,13 @@ def build_even_palindrome_advice(
     )
 
     if advice_type == "combined":
-        return AdviceProgram(matrix, schedule)
+        return _program(matrix, schedule, total_steps)
     if advice_type == "random":
-        return _random_program(matrix.size(0), schedule, random_seed)
+        return _matched_random_program(
+            matrix,
+            schedule,
+            random_seed,
+            total_steps,
+        )
 
     raise AssertionError("unhandled Even-Palindrome advice type")

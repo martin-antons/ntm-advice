@@ -1,5 +1,7 @@
 """Copy task for a baseline NTM or an advice-augmented NTM."""
 
+from __future__ import annotations
+
 import random
 
 from attr import Factory, attrib, attrs
@@ -14,18 +16,41 @@ from .advice_builders import (
     build_copy_advice,
     normalize_advice_type,
     uses_advice,
+    validate_advice_program,
 )
 
 
-def dataloader(num_batches, batch_size, seq_width, min_len, max_len):
-    """Generate random binary sequences and task metadata."""
+def dataloader(
+    num_batches,
+    batch_size,
+    seq_width,
+    min_len,
+    max_len,
+    *,
+    py_rng=None,
+    np_rng=None,
+):
+    """Generate random binary Copy examples and task metadata.
+
+    Optional local RNG objects are used for fixed validation sets without
+    consuming or resetting the training RNG streams.
+    """
+    py_rng = random if py_rng is None else py_rng
+
     for batch_num in range(1, num_batches + 1):
-        seq_len = random.randint(min_len, max_len)
-        seq = np.random.binomial(
-            1,
-            0.5,
-            (seq_len, batch_size, seq_width),
-        )
+        seq_len = py_rng.randint(min_len, max_len)
+        if np_rng is None:
+            seq = np.random.binomial(
+                1,
+                0.5,
+                (seq_len, batch_size, seq_width),
+            )
+        else:
+            seq = np_rng.binomial(
+                1,
+                0.5,
+                (seq_len, batch_size, seq_width),
+            )
         seq = torch.from_numpy(seq)
 
         inp = torch.zeros(seq_len + 1, batch_size, seq_width + 1)
@@ -59,7 +84,6 @@ class CopyTaskParams(object):
     rmsprop_momentum = attrib(default=0.9, converter=float)
     rmsprop_alpha = attrib(default=0.95, converter=float)
 
-    # Advice configuration. "none" creates the exact baseline architecture.
     advice_type = attrib(default="none", converter=normalize_advice_type)
     advice_size = attrib(default=ADVICE_WIDTH, converter=int)
     advice_strength = attrib(default=1.0, converter=float)
@@ -82,6 +106,24 @@ class CopyTaskModelTraining(object):
                     self.params.advice_type
                 )
             )
+        if (
+            uses_advice(self.params.advice_type)
+            and self.params.advice_size != ADVICE_WIDTH
+        ):
+            raise ValueError(
+                "The current builders require advice_size={}, got {}".format(
+                    ADVICE_WIDTH,
+                    self.params.advice_size,
+                )
+            )
+        if (
+            self.params.advice_type == "wrong"
+            and self.params.sequence_min_len < 2
+        ):
+            raise ValueError(
+                "wrong Copy advice requires sequence_min_len >= 2"
+            )
+
         advice_size = (
             self.params.advice_size
             if uses_advice(self.params.advice_type)
@@ -99,15 +141,32 @@ class CopyTaskModelTraining(object):
             advice_strength=self.params.advice_strength,
         )
 
-    @dataloader.default
-    def default_dataloader(self):
+    def make_dataloader(self, *, num_batches=None, seed=None):
+        count = (
+            self.params.num_batches
+            if num_batches is None
+            else int(num_batches)
+        )
+        if seed is None:
+            py_rng = None
+            np_rng = None
+        else:
+            py_rng = random.Random(int(seed))
+            np_rng = np.random.default_rng(int(seed))
+
         return dataloader(
-            self.params.num_batches,
+            count,
             self.params.batch_size,
             self.params.sequence_width,
             self.params.sequence_min_len,
             self.params.sequence_max_len,
+            py_rng=py_rng,
+            np_rng=np_rng,
         )
+
+    @dataloader.default
+    def default_dataloader(self):
+        return self.make_dataloader()
 
     @criterion.default
     def default_criterion(self):
@@ -123,11 +182,20 @@ class CopyTaskModelTraining(object):
         )
 
     def build_advice(self, metadata):
-        return build_copy_advice(
+        # The random control is deterministic for a task and sequence length.
+        # It therefore remains instance- and batch-index-independent.
+        program = build_copy_advice(
             metadata["sequence_length"],
             self.params.advice_type,
             random_seed=(
                 self.params.advice_random_seed
-                + int(metadata["batch_num"])
+                + 1009 * int(metadata["sequence_length"])
+            ),
+        )
+        return validate_advice_program(
+            program,
+            expected_steps=(
+                int(metadata["input_steps"])
+                + int(metadata["output_steps"])
             ),
         )

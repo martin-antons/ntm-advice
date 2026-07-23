@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """Core Neural Turing Machine step."""
 
+from __future__ import annotations
+
 import torch
 from torch import nn
 
@@ -17,10 +19,10 @@ class NTM(nn.Module):
         heads,
         advice_size=0,
     ):
-        super(NTM, self).__init__()
+        super().__init__()
 
-        self.num_inputs = num_inputs
-        self.num_outputs = num_outputs
+        self.num_inputs = int(num_inputs)
+        self.num_outputs = int(num_outputs)
         self.controller = controller
         self.memory = memory
         self.heads = heads
@@ -32,8 +34,8 @@ class NTM(nn.Module):
         self.N, self.M = memory.size()
         _, self.controller_size = controller.size()
 
-        # Initial previous read values.
         self.num_read_heads = 0
+        self.num_write_heads = 0
         self.init_r_names = []
         for head in heads:
             if head.is_read_head():
@@ -42,15 +44,23 @@ class NTM(nn.Module):
                 self.register_buffer(name, init_r_bias)
                 self.init_r_names.append(name)
                 self.num_read_heads += 1
+            else:
+                self.num_write_heads += 1
 
         if self.num_read_heads == 0:
             raise ValueError("heads must contain at least one read head")
 
         self.fc = nn.Linear(
             self.controller_size + self.num_read_heads * self.M,
-            num_outputs,
+            self.num_outputs,
         )
+        self.record_trace = False
+        self.last_step_trace = {}
         self.reset_parameters()
+
+    def set_record_trace(self, enabled: bool) -> None:
+        self.record_trace = bool(enabled)
+        self.last_step_trace = {}
 
     def create_new_state(self, batch_size):
         init_r = [
@@ -77,12 +87,9 @@ class NTM(nn.Module):
     ):
         """Execute one NTM time step.
 
-        For an advice-enabled model, the controller input is
-
-            [x_t ; r_(t-1) ; lambda * z_t].
-
-        The advice vector does not directly control a head, the task memory, or
-        the output layer. Its interpretation is learned by the controller.
+        All read heads are evaluated before any write head. Thus every read
+        vector r_t^(h) is obtained from the same pre-write memory state. Writes
+        are then applied sequentially; the supplied tasks use one write head.
         """
         prev_reads, prev_controller_state, prev_heads_states = prev_state
 
@@ -116,40 +123,70 @@ class NTM(nn.Module):
             ) * float(advice_strength)
             controller_parts.append(scaled_advice)
         elif advice is not None:
-            raise ValueError(
-                "This NTM was created without an advice input"
-            )
+            raise ValueError("This NTM was created without an advice input")
 
         controller_input = torch.cat(controller_parts, dim=1)
-        controller_outp, controller_state = self.controller(
+        controller_output, controller_state = self.controller(
             controller_input,
             prev_controller_state,
         )
 
+        memory_before = None
+        if self.record_trace:
+            memory_before = self.memory.memory.detach().clone()
+
+        # Preserve state order even though reads and writes are evaluated in
+        # two phases.
+        heads_states = [None] * len(self.heads)
         reads = []
-        heads_states = []
-        for head, prev_head_state in zip(
-            self.heads,
-            prev_heads_states,
+        read_weightings = []
+        write_weightings = []
+
+        for index, (head, prev_head_state) in enumerate(
+            zip(self.heads, prev_heads_states)
+        ):
+            if not head.is_read_head():
+                continue
+            read, head_state = head(controller_output, prev_head_state)
+            reads.append(read)
+            read_weightings.append(head_state)
+            heads_states[index] = head_state
+
+        for index, (head, prev_head_state) in enumerate(
+            zip(self.heads, prev_heads_states)
         ):
             if head.is_read_head():
-                read, head_state = head(
-                    controller_outp,
-                    prev_head_state,
-                )
-                reads.append(read)
-            else:
-                head_state = head(
-                    controller_outp,
-                    prev_head_state,
-                )
-            heads_states.append(head_state)
+                continue
+            head_state = head(controller_output, prev_head_state)
+            write_weightings.append(head_state)
+            heads_states[index] = head_state
 
-        output_input = torch.cat(
-            [controller_outp] + reads,
-            dim=1,
-        )
+        if any(state is None for state in heads_states):
+            raise RuntimeError("Not all NTM head states were updated")
+
+        output_input = torch.cat([controller_output] + reads, dim=1)
         output = torch.sigmoid(self.fc(output_input))
+
+        if self.record_trace:
+            batch_size = x.size(0)
+            self.last_step_trace = {
+                "controller_output": controller_output.detach().clone(),
+                "read_vectors": torch.stack(reads, dim=1).detach().clone(),
+                "read_weightings": torch.stack(
+                    read_weightings,
+                    dim=1,
+                ).detach().clone(),
+                "write_weightings": (
+                    torch.stack(write_weightings, dim=1).detach().clone()
+                    if write_weightings
+                    else x.new_zeros(batch_size, 0, self.N)
+                ),
+                "memory_before": memory_before,
+                "memory_after": self.memory.memory.detach().clone(),
+                "output": output.detach().clone(),
+            }
+        else:
+            self.last_step_trace = {}
 
         state = (reads, controller_state, heads_states)
         return output, state

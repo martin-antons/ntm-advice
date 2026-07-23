@@ -2,9 +2,9 @@
 # PYTHON_ARGCOMPLETE_OK
 """Training entry point for baseline and advice-augmented NTM tasks.
 
-The script writes one canonical ``history.json`` per run. Periodic model
-checkpoints are separate ``.pt`` files, so the complete metric arrays are not
-copied into a new JSON file at every checkpoint.
+The script writes one canonical ``history.json`` per run. Model checkpoints are
+separate ``.pt`` files. Full metric histories are not duplicated into every
+checkpoint unless ``--embed-history-in-checkpoint`` is explicitly requested.
 """
 
 from __future__ import annotations
@@ -15,11 +15,14 @@ import json
 import logging
 import os
 from pathlib import Path
+import platform
 import random
 import re
+import socket
+import subprocess
 import sys
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 try:
     import argcomplete
@@ -53,7 +56,7 @@ TASKS = {
 RANDOM_SEED = 1000
 REPORT_INTERVAL = 200
 CHECKPOINT_INTERVAL = 1000
-HISTORY_SCHEMA_VERSION = 2
+HISTORY_SCHEMA_VERSION = 3
 
 
 def _utc_now() -> str:
@@ -61,12 +64,34 @@ def _utc_now() -> str:
 
 
 def get_ms() -> float:
-    return time.time() * 1000.0
+    return time.perf_counter() * 1000.0
+
+
+def _git_commit() -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def resolve_device(name: str) -> torch.device:
+    name = str(name).strip().lower()
+    if name == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if name == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("--device=cuda was requested, but CUDA is unavailable")
+    return torch.device(name)
 
 
 def init_seed(seed: Optional[int] = None, deterministic: bool = False) -> int:
     if seed is None:
-        seed = int(get_ms() // 1000)
+        seed = int(time.time())
 
     LOGGER.info("Using seed=%d", seed)
     np.random.seed(seed)
@@ -108,7 +133,6 @@ def progress_bar(batch_num: int, report_interval: int, last_loss: float) -> None
 
 
 def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
-    """Write JSON atomically to avoid a truncated history after interruption."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     with temporary.open("w", encoding="utf-8") as file:
@@ -116,7 +140,34 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def _new_history(model, args) -> Dict[str, Any]:
+def _environment_metadata(device: torch.device) -> Dict[str, Any]:
+    cuda_name = None
+    if device.type == "cuda":
+        cuda_name = torch.cuda.get_device_name(device)
+
+    slurm_keys = [
+        "SLURM_JOB_ID",
+        "SLURM_ARRAY_JOB_ID",
+        "SLURM_ARRAY_TASK_ID",
+        "SLURM_JOB_PARTITION",
+        "SLURM_CPUS_PER_TASK",
+        "CUDA_VISIBLE_DEVICES",
+    ]
+    return {
+        "hostname": socket.gethostname(),
+        "platform": platform.platform(),
+        "python_version": platform.python_version(),
+        "torch_version": torch.__version__,
+        "cuda_version": torch.version.cuda,
+        "cudnn_version": torch.backends.cudnn.version(),
+        "device": str(device),
+        "cuda_device_name": cuda_name,
+        "git_commit": _git_commit(),
+        "slurm": {key: os.environ.get(key) for key in slurm_keys},
+    }
+
+
+def _new_history(model, args, device: torch.device) -> Dict[str, Any]:
     model_params = attr.asdict(model.params)
     advice_type = str(model_params.get("advice_type", "none"))
     run_id = args.run_id or "{}-{}-seed-{}".format(
@@ -140,23 +191,53 @@ def _new_history(model, args) -> Dict[str, Any]:
             "last_batch": 0,
             "report_interval": int(args.report_interval),
             "checkpoint_interval": int(args.checkpoint_interval),
+            "validation_interval": int(args.validation_interval),
             "parameter_count": int(model.net.calculate_num_params()),
             "deterministic": bool(args.deterministic),
+            "best_validation": None,
         },
         "model_params": model_params,
+        "training_args": {
+            key: value
+            for key, value in vars(args).items()
+            if isinstance(value, (str, int, float, bool, list)) or value is None
+        },
+        "environment": _environment_metadata(device),
         "metrics": {
             "batch": [],
             "loss": [],
             "cost": [],
+            "bit_error_rate": [],
+            "exact_sequence_accuracy": [],
             "sequence_length": [],
+            "repetitions": [],
+            "input_steps": [],
+            "output_steps": [],
+            "batch_time_ms": [],
         },
         "reports": {
             "batch": [],
             "mean_loss": [],
             "mean_cost": [],
+            "mean_bit_error_rate": [],
+            "mean_exact_sequence_accuracy": [],
             "ms_per_sequence": [],
+            # Kept for backwards-compatible plotting: these are the last values
+            # in each report interval.
             "advice_weight_norm": [],
             "advice_gradient_norm": [],
+            # Explicit interval means for the new schema.
+            "mean_advice_weight_norm": [],
+            "mean_advice_gradient_norm": [],
+        },
+        "validation": {
+            "batch": [],
+            "mean_loss": [],
+            "mean_cost": [],
+            "mean_bit_error_rate": [],
+            "mean_exact_sequence_accuracy": [],
+            "num_batches": int(args.validation_batches),
+            "seed": int(args.validation_seed),
         },
     }
 
@@ -164,6 +245,29 @@ def _new_history(model, args) -> Dict[str, Any]:
 def _save_history(history: Dict[str, Any], run_dir: Path) -> None:
     history["run"]["updated_at"] = _utc_now()
     _atomic_write_json(run_dir / "history.json", history)
+
+
+def _rng_state() -> Dict[str, Any]:
+    state = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def _last_values(history: Dict[str, Any]) -> Dict[str, Any]:
+    result = {}
+    for section_name in ("metrics", "reports", "validation"):
+        section = history[section_name]
+        result[section_name] = {
+            key: (values[-1] if isinstance(values, list) and values else None)
+            for key, values in section.items()
+            if key not in {"num_batches", "seed"}
+        }
+    return result
 
 
 def save_checkpoint(
@@ -190,14 +294,21 @@ def save_checkpoint(
         "batch_num": int(batch_num),
         "seed": int(args.seed),
         "task": args.task,
-        "run": history["run"],
-        "model_params": history["model_params"],
+        "run": dict(history["run"]),
+        "model_params": dict(history["model_params"]),
+        "training_args": dict(history["training_args"]),
+        "environment": dict(history["environment"]),
         "model_state_dict": model.net.state_dict(),
         "optimizer_state_dict": model.optimizer.state_dict(),
-        # Included for convenient resume/inspection from a single file.
-        "metrics": history["metrics"],
-        "reports": history["reports"],
+        "rng_state": _rng_state(),
+        "history_path": "history.json",
+        "last_values": _last_values(history),
     }
+
+    if args.embed_history_in_checkpoint:
+        checkpoint["metrics"] = history["metrics"]
+        checkpoint["reports"] = history["reports"]
+        checkpoint["validation"] = history["validation"]
 
     LOGGER.info("Saving checkpoint to '%s'", checkpoint_path)
     torch.save(checkpoint, checkpoint_path)
@@ -236,38 +347,92 @@ def _compute_loss(criterion, prediction, target, loss_mask=None):
     return (elementwise * loss_mask).sum() / normalizer
 
 
-def _compute_cost(prediction, target, batch_size, loss_mask=None) -> float:
+def _compute_prediction_metrics(
+    prediction,
+    target,
+    loss_mask=None,
+) -> Dict[str, float]:
     binary = prediction.detach().ge(0.5).to(target.dtype)
-    errors = torch.abs(binary - target.detach())
-    if loss_mask is not None:
-        errors = errors * loss_mask.to(
+    errors = binary.ne(target.detach()).to(prediction.dtype)
+
+    if loss_mask is None:
+        active = torch.ones_like(errors)
+    else:
+        active = loss_mask.to(
             device=errors.device,
             dtype=errors.dtype,
         )
-    return errors.sum().item() / batch_size
+        if active.shape != errors.shape:
+            raise ValueError("loss_mask shape does not match prediction shape")
+        errors = errors * active
+
+    wrong_bits = errors.sum()
+    supervised_bits = active.sum().clamp_min(1.0)
+    errors_per_sequence = errors.sum(dim=(0, 2))
+
+    return {
+        # Backwards-compatible cost: wrong supervised bits per sequence.
+        "cost": float(wrong_bits.item() / prediction.size(1)),
+        "bit_error_rate": float(
+            (wrong_bits / supervised_bits).item()
+        ),
+        "exact_sequence_accuracy": float(
+            errors_per_sequence.eq(0).float().mean().item()
+        ),
+    }
 
 
-def _init_model_sequence(net, batch_size, advice_program=None, trace=False):
+def _check_schedule_contract(advice_program, expected_steps: int) -> None:
+    if advice_program is None:
+        return
+    actual_steps = int(advice_program.schedule.size(0))
+    if actual_steps != int(expected_steps):
+        raise ValueError(
+            "Advice schedule contains {} steps, but the task executes {}".format(
+                actual_steps,
+                int(expected_steps),
+            )
+        )
+
+
+def _assert_schedule_consumed(net) -> None:
+    if (
+        getattr(net, "uses_advice", False)
+        and net.advice_reader.is_loaded
+        and net.time_step != net.advice_reader.total_steps
+    ):
+        raise RuntimeError(
+            "The task consumed {} model steps, but the advice schedule has {}"
+            .format(net.time_step, net.advice_reader.total_steps)
+        )
+
+
+def _init_model_sequence(
+    net,
+    batch_size,
+    advice_program=None,
+    *,
+    record_advice_trace=False,
+    record_ntm_trace=False,
+):
     if advice_program is None:
         net.init_sequence(
             batch_size,
-            record_advice_trace=trace,
+            record_advice_trace=record_advice_trace,
+            record_ntm_trace=record_ntm_trace,
         )
     else:
         net.init_sequence(
             batch_size,
             advice=advice_program.matrix,
             advice_schedule=advice_program.schedule,
-            record_advice_trace=trace,
+            record_advice_trace=record_advice_trace,
+            record_ntm_trace=record_ntm_trace,
         )
 
 
 def _advice_diagnostics(net) -> Optional[Dict[str, float]]:
-    """Inspect the advice columns in the first LSTM input matrix.
-
-    Advice is concatenated only to the input of LSTM layer 0. Therefore the
-    final ``advice_size`` columns of ``weight_ih_l0`` are the relevant weights.
-    """
+    """Inspect the advice columns in the first LSTM input matrix."""
     advice_size = int(getattr(net, "advice_size", 0))
     if advice_size <= 0:
         return None
@@ -296,10 +461,19 @@ def train_batch(
     *,
     advice_program=None,
     loss_mask=None,
+    return_metrics=False,
 ):
+    """Run one optimizer step.
+
+    The default return value remains ``(loss, cost, diagnostics)`` for backwards
+    compatibility. ``return_metrics=True`` returns the full metric dictionary
+    in place of the scalar cost.
+    """
     optimizer.zero_grad()
     inp_seq_len = X.size(0)
     outp_seq_len, batch_size, _ = Y.size()
+    expected_steps = inp_seq_len + outp_seq_len
+    _check_schedule_contract(advice_program, expected_steps)
 
     _init_model_sequence(net, batch_size, advice_program)
 
@@ -310,21 +484,27 @@ def train_batch(
     for step in range(outp_seq_len):
         y_out[step], _ = net()
 
+    _assert_schedule_consumed(net)
+
     loss = _compute_loss(criterion, y_out, Y, loss_mask)
     loss.backward()
     clip_grads(net)
 
-    # Gradient must be inspected before optimizer.step()/zero_grad().
     diagnostics = _advice_diagnostics(net)
     optimizer.step()
 
-    # Weight norm after the update is more intuitive in the report.
     if diagnostics is not None:
         updated = _advice_diagnostics(net)
         diagnostics["weight_norm"] = updated["weight_norm"]
 
-    cost = _compute_cost(y_out, Y, batch_size, loss_mask)
-    return loss.item(), cost, diagnostics
+    prediction_metrics = _compute_prediction_metrics(
+        y_out,
+        Y,
+        loss_mask,
+    )
+    if return_metrics:
+        return loss.item(), prediction_metrics, diagnostics
+    return loss.item(), prediction_metrics["cost"], diagnostics
 
 
 def evaluate(
@@ -336,39 +516,60 @@ def evaluate(
     advice_program=None,
     loss_mask=None,
     record_advice_trace=False,
+    record_ntm_trace=False,
+    collect_states=True,
+    return_outputs=True,
 ):
     inp_seq_len = X.size(0)
     outp_seq_len, batch_size, _ = Y.size()
+    expected_steps = inp_seq_len + outp_seq_len
+    _check_schedule_contract(advice_program, expected_steps)
 
-    with torch.no_grad():
-        _init_model_sequence(
-            net,
-            batch_size,
-            advice_program,
-            trace=record_advice_trace,
-        )
+    was_training = net.training
+    net.eval()
+    try:
+        with torch.no_grad():
+            _init_model_sequence(
+                net,
+                batch_size,
+                advice_program,
+                record_advice_trace=record_advice_trace,
+                record_ntm_trace=record_ntm_trace,
+            )
 
-        states = []
-        for step in range(inp_seq_len):
-            _, state = net(X[step])
-            states.append(state)
+            states = []
+            for step in range(inp_seq_len):
+                _, state = net(X[step])
+                if collect_states:
+                    states.append(state)
 
-        y_out = Y.new_zeros(Y.size())
-        for step in range(outp_seq_len):
-            y_out[step], state = net()
-            states.append(state)
+            y_out = Y.new_zeros(Y.size())
+            for step in range(outp_seq_len):
+                y_out[step], state = net()
+                if collect_states:
+                    states.append(state)
 
-        loss = _compute_loss(criterion, y_out, Y, loss_mask)
-        cost = _compute_cost(y_out, Y, batch_size, loss_mask)
+            _assert_schedule_consumed(net)
+            loss = _compute_loss(criterion, y_out, Y, loss_mask)
+            prediction_metrics = _compute_prediction_metrics(
+                y_out,
+                Y,
+                loss_mask,
+            )
+    finally:
+        net.train(was_training)
 
-    return {
+    result = {
         "loss": loss.item(),
-        "cost": cost,
-        "y_out": y_out,
-        "y_out_binarized": y_out.ge(0.5).to(Y.dtype),
+        **prediction_metrics,
         "states": states,
         "advice_trace": list(net.advice_trace),
+        "ntm_trace": list(net.ntm_trace),
     }
+    if return_outputs:
+        result["y_out"] = y_out
+        result["y_out_binarized"] = y_out.ge(0.5).to(Y.dtype)
+    return result
 
 
 def _unpack_batch(batch):
@@ -397,13 +598,21 @@ def _append_report(
     batch_num: int,
     mean_loss: float,
     mean_cost: float,
+    mean_bit_error_rate: float,
+    mean_exact_sequence_accuracy: float,
     ms_per_sequence: int,
     diagnostics: Optional[Dict[str, float]],
+    mean_weight_norm: Optional[float],
+    mean_gradient_norm: Optional[float],
 ) -> None:
     reports = history["reports"]
     reports["batch"].append(int(batch_num))
     reports["mean_loss"].append(float(mean_loss))
     reports["mean_cost"].append(float(mean_cost))
+    reports["mean_bit_error_rate"].append(float(mean_bit_error_rate))
+    reports["mean_exact_sequence_accuracy"].append(
+        float(mean_exact_sequence_accuracy)
+    )
     reports["ms_per_sequence"].append(int(ms_per_sequence))
     reports["advice_weight_norm"].append(
         None if diagnostics is None else float(diagnostics["weight_norm"])
@@ -411,34 +620,143 @@ def _append_report(
     reports["advice_gradient_norm"].append(
         None if diagnostics is None else float(diagnostics["gradient_norm"])
     )
+    reports["mean_advice_weight_norm"].append(mean_weight_norm)
+    reports["mean_advice_gradient_norm"].append(mean_gradient_norm)
 
 
-def train_model(model, args):
+def _prepare_validation_batches(model, args):
+    if args.validation_interval <= 0 or args.validation_batches <= 0:
+        return []
+    if not hasattr(model, "make_dataloader"):
+        raise RuntimeError(
+            "Validation was requested, but the task has no make_dataloader()"
+        )
+    return list(
+        model.make_dataloader(
+            num_batches=args.validation_batches,
+            seed=args.validation_seed,
+        )
+    )
+
+
+def _run_validation(model, validation_batches, device) -> Dict[str, float]:
+    values = {
+        "loss": [],
+        "cost": [],
+        "bit_error_rate": [],
+        "exact_sequence_accuracy": [],
+    }
+    for batch in validation_batches:
+        _, x, y, metadata = _unpack_batch(batch)
+        x = x.to(device)
+        y = y.to(device)
+        advice_program = _build_advice(model, metadata)
+        result = evaluate(
+            model.net,
+            model.criterion,
+            x,
+            y,
+            advice_program=advice_program,
+            loss_mask=metadata.get("loss_mask"),
+            collect_states=False,
+            return_outputs=False,
+        )
+        for key in values:
+            values[key].append(float(result[key]))
+
+    return {
+        "mean_loss": float(np.mean(values["loss"])),
+        "mean_cost": float(np.mean(values["cost"])),
+        "mean_bit_error_rate": float(
+            np.mean(values["bit_error_rate"])
+        ),
+        "mean_exact_sequence_accuracy": float(
+            np.mean(values["exact_sequence_accuracy"])
+        ),
+    }
+
+
+def _is_better_validation(candidate, best) -> bool:
+    if best is None:
+        return True
+    candidate_accuracy = candidate["mean_exact_sequence_accuracy"]
+    best_accuracy = best["mean_exact_sequence_accuracy"]
+    if candidate_accuracy > best_accuracy + 1e-12:
+        return True
+    if abs(candidate_accuracy - best_accuracy) <= 1e-12:
+        return candidate["mean_loss"] < best["mean_loss"]
+    return False
+
+
+def _record_validation(
+    model,
+    args,
+    history,
+    validation_batches,
+    device,
+    batch_num,
+):
+    result = _run_validation(model, validation_batches, device)
+    validation = history["validation"]
+    validation["batch"].append(int(batch_num))
+    for key, value in result.items():
+        validation[key].append(float(value))
+
+    LOGGER.info(
+        "Validation at batch %d: loss=%.6f BER=%.6f exact=%.4f",
+        batch_num,
+        result["mean_loss"],
+        result["mean_bit_error_rate"],
+        result["mean_exact_sequence_accuracy"],
+    )
+
+    current = {"batch": int(batch_num), **result}
+    best = history["run"]["best_validation"]
+    if _is_better_validation(current, best):
+        history["run"]["best_validation"] = current
+        save_checkpoint(
+            model,
+            args,
+            batch_num,
+            history,
+            label="best",
+        )
+    return result
+
+
+def train_model(model, args, device: torch.device):
     num_batches = model.params.num_batches
     batch_size = model.params.batch_size
     run_dir = Path(args.checkpoint_path)
     run_dir.mkdir(parents=True, exist_ok=True)
 
     LOGGER.info(
-        "Training model for %d batches (batch_size=%d)...",
+        "Training model for %d batches (batch_size=%d) on %s...",
         num_batches,
         batch_size,
+        device,
     )
 
-    history = _new_history(model, args)
+    history = _new_history(model, args, device)
     _save_history(history, run_dir)
+    validation_batches = _prepare_validation_batches(model, args)
 
-    start_ms = get_ms()
+    report_start_ms = get_ms()
     batch_num = 0
     last_diagnostics = None
+    interval_weight_norms = []
+    interval_gradient_norms = []
 
     try:
         for batch in model.dataloader:
             batch_num, x, y, metadata = _unpack_batch(batch)
+            x = x.to(device)
+            y = y.to(device)
             advice_program = _build_advice(model, metadata)
             loss_mask = metadata.get("loss_mask")
 
-            loss, cost, diagnostics = train_batch(
+            batch_start_ms = get_ms()
+            loss, prediction_metrics, diagnostics = train_batch(
                 model.net,
                 model.criterion,
                 model.optimizer,
@@ -446,42 +764,82 @@ def train_model(model, args):
                 y,
                 advice_program=advice_program,
                 loss_mask=loss_mask,
+                return_metrics=True,
             )
+            batch_time_ms = get_ms() - batch_start_ms
             last_diagnostics = diagnostics
+
+            if diagnostics is not None:
+                interval_weight_norms.append(diagnostics["weight_norm"])
+                interval_gradient_norms.append(diagnostics["gradient_norm"])
 
             metrics = history["metrics"]
             metrics["batch"].append(int(batch_num))
             metrics["loss"].append(float(loss))
-            metrics["cost"].append(float(cost))
+            metrics["cost"].append(float(prediction_metrics["cost"]))
+            metrics["bit_error_rate"].append(
+                float(prediction_metrics["bit_error_rate"])
+            )
+            metrics["exact_sequence_accuracy"].append(
+                float(prediction_metrics["exact_sequence_accuracy"])
+            )
             metrics["sequence_length"].append(
                 int(metadata.get("sequence_length", y.size(0)))
             )
+            repetitions = metadata.get("repetitions")
+            metrics["repetitions"].append(
+                None if repetitions is None else int(repetitions)
+            )
+            metrics["input_steps"].append(
+                int(metadata.get("input_steps", x.size(0)))
+            )
+            metrics["output_steps"].append(
+                int(metadata.get("output_steps", y.size(0)))
+            )
+            metrics["batch_time_ms"].append(float(batch_time_ms))
             history["run"]["last_batch"] = int(batch_num)
 
             progress_bar(batch_num, args.report_interval, loss)
 
             if batch_num % args.report_interval == 0:
-                mean_loss = float(
-                    np.asarray(metrics["loss"][-args.report_interval:]).mean()
+                interval = slice(-args.report_interval, None)
+                mean_loss = float(np.mean(metrics["loss"][interval]))
+                mean_cost = float(np.mean(metrics["cost"][interval]))
+                mean_ber = float(
+                    np.mean(metrics["bit_error_rate"][interval])
                 )
-                mean_cost = float(
-                    np.asarray(metrics["cost"][-args.report_interval:]).mean()
+                mean_exact = float(
+                    np.mean(metrics["exact_sequence_accuracy"][interval])
                 )
                 mean_time = int(
-                    ((get_ms() - start_ms) / args.report_interval)
+                    ((get_ms() - report_start_ms) / args.report_interval)
                     / batch_size
                 )
+                mean_weight = (
+                    float(np.mean(interval_weight_norms))
+                    if interval_weight_norms
+                    else None
+                )
+                mean_gradient = (
+                    float(np.mean(interval_gradient_norms))
+                    if interval_gradient_norms
+                    else None
+                )
+
                 progress_clean()
                 LOGGER.info(
-                    "Batch %d Loss: %.6f Cost: %.2f Time: %d ms/sequence",
+                    "Batch %d Loss: %.6f Cost: %.2f BER: %.6f "
+                    "Exact: %.4f Time: %d ms/sequence",
                     batch_num,
                     mean_loss,
                     mean_cost,
+                    mean_ber,
+                    mean_exact,
                     mean_time,
                 )
                 if diagnostics is not None:
                     LOGGER.info(
-                        "Advice weight norm: %.6f | Advice gradient norm: %.6f",
+                        "Advice weight norm: %.6f | gradient norm: %.6f",
                         diagnostics["weight_norm"],
                         diagnostics["gradient_norm"],
                     )
@@ -491,10 +849,30 @@ def train_model(model, args):
                     batch_num,
                     mean_loss,
                     mean_cost,
+                    mean_ber,
+                    mean_exact,
                     mean_time,
                     diagnostics,
+                    mean_weight,
+                    mean_gradient,
                 )
-                start_ms = get_ms()
+                report_start_ms = get_ms()
+                interval_weight_norms = []
+                interval_gradient_norms = []
+                _save_history(history, run_dir)
+
+            if (
+                validation_batches
+                and batch_num % args.validation_interval == 0
+            ):
+                _record_validation(
+                    model,
+                    args,
+                    history,
+                    validation_batches,
+                    device,
+                    batch_num,
+                )
 
             if (
                 args.checkpoint_interval != 0
@@ -523,6 +901,22 @@ def train_model(model, args):
         _save_history(history, run_dir)
         LOGGER.exception("Training failed at batch %d", batch_num)
         raise
+
+    if (
+        validation_batches
+        and (
+            not history["validation"]["batch"]
+            or history["validation"]["batch"][-1] != batch_num
+        )
+    ):
+        _record_validation(
+            model,
+            args,
+            history,
+            validation_batches,
+            device,
+            batch_num,
+        )
 
     history["run"]["status"] = "completed"
     history["run"]["completed_at"] = _utc_now()
@@ -570,6 +964,12 @@ def init_arguments():
         help='Override model params, e.g. "-padvice_type=relation"',
     )
     parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "cuda"],
+        default="auto",
+        help="Execution device. 'auto' uses CUDA when available.",
+    )
+    parser.add_argument(
         "--checkpoint-interval",
         type=int,
         default=CHECKPOINT_INTERVAL,
@@ -586,9 +986,30 @@ def init_arguments():
         default=REPORT_INTERVAL,
     )
     parser.add_argument(
+        "--validation-interval",
+        type=int,
+        default=0,
+        help="Run fixed validation every N batches; 0 disables validation",
+    )
+    parser.add_argument(
+        "--validation-batches",
+        type=int,
+        default=100,
+    )
+    parser.add_argument(
+        "--validation-seed",
+        type=int,
+        default=424242,
+    )
+    parser.add_argument(
         "--save-final",
         action="store_true",
         help="Save checkpoint-final.pt after training",
+    )
+    parser.add_argument(
+        "--embed-history-in-checkpoint",
+        action="store_true",
+        help="Embed full metric arrays in every checkpoint (legacy/heavy)",
     )
     parser.add_argument(
         "--run-id",
@@ -604,6 +1025,22 @@ def init_arguments():
     if argcomplete is not None:
         argcomplete.autocomplete(parser)
     return parser.parse_args()
+
+
+
+def validate_runtime_args(args) -> None:
+    if args.report_interval <= 0:
+        raise ValueError("--report-interval must be positive")
+    if args.checkpoint_interval < 0:
+        raise ValueError("--checkpoint-interval must be non-negative")
+    if args.validation_interval < 0:
+        raise ValueError("--validation-interval must be non-negative")
+    if args.validation_batches < 0:
+        raise ValueError("--validation-batches must be non-negative")
+    if args.validation_interval > 0 and args.validation_batches == 0:
+        raise ValueError(
+            "--validation-batches must be positive when validation is enabled"
+        )
 
 
 def update_model_params(params, update):
@@ -647,13 +1084,16 @@ def init_logging():
 def main():
     init_logging()
     args = init_arguments()
+    validate_runtime_args(args)
     init_seed(args.seed, deterministic=args.deterministic)
+    device = resolve_device(args.device)
     model = init_model(args)
+    model.net.to(device)
     LOGGER.info(
         "Total number of parameters: %d",
         model.net.calculate_num_params(),
     )
-    train_model(model, args)
+    train_model(model, args, device)
 
 
 if __name__ == "__main__":
