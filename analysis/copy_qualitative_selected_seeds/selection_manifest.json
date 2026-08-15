@@ -1,0 +1,23 @@
+{
+  "selected_seeds": [
+    1001,
+    1002,
+    1004
+  ],
+  "selected_checkpoints": [
+    5000,
+    20000
+  ],
+  "sequence_lengths": [
+    10,
+    20,
+    30,
+    50,
+    100
+  ],
+  "example_seed": 20260814,
+  "advice_conditions": [
+    "none",
+    "combined"
+  ]
+}

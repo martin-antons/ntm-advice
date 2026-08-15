@@ -1,14 +1,9 @@
 """Read-only advice memory and deterministic advice access.
 
-The components in this module are deliberately task-independent:
-
 * ``AdviceMemoryMatrix`` stores externally constructed structural prior
   knowledge. It has no write operation and no trainable parameters.
 * ``DeterministicAdviceReader`` selects one row at each model time step from
   an externally supplied schedule. It has no trainable parameters.
-
-Task-specific code will later construct both the advice matrix and the schedule.
-The NTM itself only receives the selected advice vector.
 """
 
 from typing import NamedTuple, Optional

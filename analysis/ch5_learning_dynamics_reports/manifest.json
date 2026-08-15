@@ -1,0 +1,636 @@
+{
+  "runs_dir": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\runs",
+  "source": "reports",
+  "additional_temporal_smoothing": false,
+  "aggregation_description": "Each report point is the stored mean over the training report interval; curves then average those report means across common seeds at identical report batches.",
+  "completed_only": false,
+  "global_max_batch": null,
+  "plots": [
+    {
+      "task": "copy",
+      "group": "baseline_vs_combined",
+      "metric": "ber",
+      "advices": [
+        "none",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 20000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\baseline_vs_combined_ber.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\baseline_vs_combined_ber.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\aggregated_baseline_vs_combined_ber.csv"
+    },
+    {
+      "task": "copy",
+      "group": "baseline_vs_combined",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 20000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\baseline_vs_combined_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\baseline_vs_combined_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\aggregated_baseline_vs_combined_loss.csv"
+    },
+    {
+      "task": "copy",
+      "group": "controls",
+      "metric": "ber",
+      "advices": [
+        "none",
+        "zero",
+        "random",
+        "wrong"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 20000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\controls_ber.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\controls_ber.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\aggregated_controls_ber.csv"
+    },
+    {
+      "task": "copy",
+      "group": "controls",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "zero",
+        "random",
+        "wrong"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 20000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\controls_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\controls_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\aggregated_controls_loss.csv"
+    },
+    {
+      "task": "copy",
+      "group": "structural_features",
+      "metric": "ber",
+      "advices": [
+        "none",
+        "length",
+        "position",
+        "operation",
+        "relation",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 20000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\structural_features_ber.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\structural_features_ber.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\aggregated_structural_features_ber.csv"
+    },
+    {
+      "task": "copy",
+      "group": "structural_features",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "length",
+        "position",
+        "operation",
+        "relation",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 20000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\structural_features_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\structural_features_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\aggregated_structural_features_loss.csv"
+    },
+    {
+      "task": "copy",
+      "group": "phase_ablation",
+      "metric": "ber",
+      "advices": [
+        "none",
+        "write_only",
+        "read_only",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 20000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\phase_ablation_ber.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\phase_ablation_ber.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\aggregated_phase_ablation_ber.csv"
+    },
+    {
+      "task": "copy",
+      "group": "phase_ablation",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "write_only",
+        "read_only",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 20000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\phase_ablation_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\phase_ablation_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\copy\\aggregated_phase_ablation_loss.csv"
+    },
+    {
+      "task": "even-palindrome",
+      "group": "baseline_vs_combined",
+      "metric": "accuracy",
+      "advices": [
+        "none",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 100000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\baseline_vs_combined_accuracy.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\baseline_vs_combined_accuracy.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\aggregated_baseline_vs_combined_accuracy.csv"
+    },
+    {
+      "task": "even-palindrome",
+      "group": "baseline_vs_combined",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 100000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\baseline_vs_combined_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\baseline_vs_combined_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\aggregated_baseline_vs_combined_loss.csv"
+    },
+    {
+      "task": "even-palindrome",
+      "group": "controls",
+      "metric": "accuracy",
+      "advices": [
+        "none",
+        "zero",
+        "random",
+        "wrong"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 77000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\controls_accuracy.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\controls_accuracy.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\aggregated_controls_accuracy.csv"
+    },
+    {
+      "task": "even-palindrome",
+      "group": "controls",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "zero",
+        "random",
+        "wrong"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 77000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\controls_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\controls_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\aggregated_controls_loss.csv"
+    },
+    {
+      "task": "even-palindrome",
+      "group": "structural_features",
+      "metric": "accuracy",
+      "advices": [
+        "none",
+        "length",
+        "position",
+        "operation",
+        "relation",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 67800,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\structural_features_accuracy.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\structural_features_accuracy.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\aggregated_structural_features_accuracy.csv"
+    },
+    {
+      "task": "even-palindrome",
+      "group": "structural_features",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "length",
+        "position",
+        "operation",
+        "relation",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 67800,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\structural_features_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\structural_features_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\aggregated_structural_features_loss.csv"
+    },
+    {
+      "task": "even-palindrome",
+      "group": "comparison_structure",
+      "metric": "accuracy",
+      "advices": [
+        "none",
+        "position",
+        "pair_index",
+        "relation",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 67800,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\comparison_structure_accuracy.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\comparison_structure_accuracy.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\aggregated_comparison_structure_accuracy.csv"
+    },
+    {
+      "task": "even-palindrome",
+      "group": "comparison_structure",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "position",
+        "pair_index",
+        "relation",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "n_seeds": 6,
+      "min_batch": 1,
+      "common_horizon": 67800,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\comparison_structure_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\comparison_structure_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\even-palindrome\\aggregated_comparison_structure_loss.csv"
+    },
+    {
+      "task": "repeat-copy",
+      "group": "baseline_vs_combined",
+      "metric": "ber",
+      "advices": [
+        "none",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003
+      ],
+      "n_seeds": 4,
+      "min_batch": 1,
+      "common_horizon": 59000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\baseline_vs_combined_ber.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\baseline_vs_combined_ber.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\aggregated_baseline_vs_combined_ber.csv"
+    },
+    {
+      "task": "repeat-copy",
+      "group": "baseline_vs_combined",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003
+      ],
+      "n_seeds": 4,
+      "min_batch": 1,
+      "common_horizon": 59000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\baseline_vs_combined_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\baseline_vs_combined_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\aggregated_baseline_vs_combined_loss.csv"
+    },
+    {
+      "task": "repeat-copy",
+      "group": "controls",
+      "metric": "ber",
+      "advices": [
+        "none",
+        "zero",
+        "random"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003
+      ],
+      "n_seeds": 4,
+      "min_batch": 1,
+      "common_horizon": 90200,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\controls_ber.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\controls_ber.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\aggregated_controls_ber.csv"
+    },
+    {
+      "task": "repeat-copy",
+      "group": "controls",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "zero",
+        "random"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003
+      ],
+      "n_seeds": 4,
+      "min_batch": 1,
+      "common_horizon": 90200,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\controls_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\controls_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\aggregated_controls_loss.csv"
+    },
+    {
+      "task": "repeat-copy",
+      "group": "structural_features",
+      "metric": "ber",
+      "advices": [
+        "none",
+        "length",
+        "position",
+        "operation",
+        "relation",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003
+      ],
+      "n_seeds": 4,
+      "min_batch": 1,
+      "common_horizon": 59000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\structural_features_ber.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\structural_features_ber.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\aggregated_structural_features_ber.csv"
+    },
+    {
+      "task": "repeat-copy",
+      "group": "structural_features",
+      "metric": "loss",
+      "advices": [
+        "none",
+        "length",
+        "position",
+        "operation",
+        "relation",
+        "combined"
+      ],
+      "common_seeds": [
+        1000,
+        1001,
+        1002,
+        1003
+      ],
+      "n_seeds": 4,
+      "min_batch": 1,
+      "common_horizon": 59000,
+      "report_intervals": [
+        200
+      ],
+      "sd_shading": true,
+      "pdf": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\structural_features_loss.pdf",
+      "png": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\structural_features_loss.png",
+      "csv": "C:\\Users\\marti\\Desktop\\Bachelorarbeit\\ntm-advice\\analysis\\ch5_learning_dynamics_reports\\repeat-copy\\aggregated_structural_features_loss.csv"
+    }
+  ]
+}

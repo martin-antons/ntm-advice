@@ -1,0 +1,15 @@
+slurm_job_id=227820
+slurm_array_job_id=227609
+slurm_array_task_id=26
+host=servant-4.GPU.CIT-EC.NET
+project_dir=/homes/mantons/projects/ntm-advice
+conda_env=ntm-advice
+git_branch=feature/architecture-freeze
+git_commit=03ae41bd73b8e9917926b723846e01042e7b2de9
+task=copy
+advice_type=position
+seed=1002
+run_dir=/homes/mantons/projects/ntm-advice/runs/final/copy/position/seed_1002
+cuda_visible_devices=0
+started_at=2026-07-23T18:57:27+02:00
+finished_at=2026-07-23T21:49:30+02:00

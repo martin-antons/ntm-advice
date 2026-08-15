@@ -1,9 +1,9 @@
 """Task-specific structural advice builders.
 
-Each builder returns an ``AdviceProgram`` consisting of
+Each builder returns an AdviceProgram consisting of
 
-* a fixed-width read-only matrix ``A`` with shape ``(num_rows, 16)``;
-* a deterministic schedule ``rho`` with one row index per model step.
+* a fixed-width read-only matrix A with shape (num_rows, 16);
+* a deterministic schedule rho with one row index per model step.
 
 The rows never contain input symbols, target values, labels, or concrete rows
 of the writable NTM task memory. Logical positions are normalized to ``[0, 1]``

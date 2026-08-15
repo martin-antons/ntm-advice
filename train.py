@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # PYTHON_ARGCOMPLETE_OK
-"""Training entry point for baseline and advice-augmented NTM tasks.
+"""
+Training entry point for baseline and advice-augmented NTM tasks.
 
 The script writes one canonical ``history.json`` per run. Model checkpoints are
 separate ``.pt`` files. Full metric histories are not duplicated into every

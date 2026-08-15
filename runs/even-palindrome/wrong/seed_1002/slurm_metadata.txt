@@ -1,0 +1,17 @@
+slurm_job_id=229369
+slurm_array_job_id=228081
+slurm_array_task_id=50
+host=servant-4.GPU.CIT-EC.NET
+project_dir=/homes/mantons/projects/ntm-advice
+conda_env=ntm-advice
+git_branch=feature/architecture-freeze
+git_commit=03ae41bd73b8e9917926b723846e01042e7b2de9
+task=even-palindrome
+advice_type=wrong
+seed=1002
+num_batches=100000
+run_dir=/homes/mantons/projects/ntm-advice/runs/final/even-palindrome/wrong/seed_1002
+cuda_visible_devices=0
+started_at=2026-07-29T09:38:19+02:00
+finished_at=2026-07-30T00:01:01+02:00
+exit_code=0

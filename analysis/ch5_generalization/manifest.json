@@ -1,0 +1,86 @@
+{
+  "protocol": {
+    "advices": [
+      "none",
+      "combined"
+    ],
+    "test_seed": 20260815,
+    "eval_batch_size": 20,
+    "test_data": "Dedicated deterministic test stream; identical examples for all training seeds and advice conditions of a task condition.",
+    "checkpoint_policy": "Fixed periodic checkpoints, not best-validation checkpoints.",
+    "seed_aggregation": "mean and population SD (ddof=0)",
+    "training_ranges": {
+      "copy": "sequence length 2..20",
+      "even-palindrome": "even sequence length 2..20",
+      "repeat-copy": "sequence length 2..20, repetitions 1..5"
+    }
+  },
+  "tasks": {
+    "copy": {
+      "checkpoint_batch": 20000,
+      "seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "lengths": [
+        10,
+        20,
+        30,
+        50,
+        100
+      ],
+      "examples_per_length": 500,
+      "primary_metric": "bit_error_rate"
+    },
+    "even-palindrome": {
+      "checkpoint_batch": 100000,
+      "seeds": [
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "lengths": [
+        10,
+        20,
+        30,
+        50,
+        100
+      ],
+      "examples_per_length": 500,
+      "primary_metric": "classification_accuracy"
+    },
+    "repeat-copy": {
+      "checkpoint_batch": 50000,
+      "seeds": [
+        1000,
+        1001,
+        1002,
+        1003
+      ],
+      "lengths": [
+        10,
+        20,
+        30,
+        50
+      ],
+      "repetitions": [
+        1,
+        3,
+        5,
+        7,
+        10
+      ],
+      "examples_per_grid_point": 200,
+      "primary_metric": "bit_error_rate",
+      "shared_heatmap_vmin": 0.0,
+      "shared_heatmap_vmax": 0.38793551661074155
+    }
+  }
+}
