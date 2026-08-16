@@ -1,1 +1,1 @@
-# PyTorch Advice guided Neural Turing Machine (NTM)
+# PyTorch Advice guided Neural Turing Machine (NTM+λA)
